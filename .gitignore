@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Data (downloaded at runtime)
+data/
+
+# Test log artefacts prefixed with _test_
+results/raw/_test_*.jsonl
+
+# Claude Code
+.claude/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db

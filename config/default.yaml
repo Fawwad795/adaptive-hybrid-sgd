@@ -1,0 +1,31 @@
+# ── Training ──────────────────────────────────────────────────────────────────
+lr: 0.01
+batch_size: 64
+epochs: 10
+seed: 42
+
+# ── Workload ───────────────────────────────────────────────────────────────────
+dataset: mnist          # mnist | cifar10
+model: logreg           # logreg | cnn
+
+# ── Distributed ────────────────────────────────────────────────────────────────
+num_workers: 4
+mode: single            # single | ps | rar | hybrid
+ps_discipline: bsp      # bsp | ssp | async
+ssp_staleness: 2        # max gradient lag allowed in SSP mode
+
+# ── Controller thresholds ──────────────────────────────────────────────────────
+bw_saturation_ratio: 0.85      # fraction of link capacity; above → prefer PS
+straggler_lag_ratio: 2.0       # worker lag / median lag; above → prefer PS
+heartbeat_timeout_ms: 3000     # ms without heartbeat → worker considered dead
+switching_cost_margin: 0.05    # min expected gain (fraction) to justify a switch
+hysteresis_rounds: 3           # min rounds before another topology switch allowed
+
+# ── I/O ────────────────────────────────────────────────────────────────────────
+log_dir: results/raw
+checkpoint_dir: checkpoints
+data_dir: data
+
+# ── Bandwidth throttle shim (Phase 4+) ─────────────────────────────────────────
+throttle_mbps: 0          # 0 = no throttle; e.g. 100, 1000, 10000
+throttle_jitter_ms: 0     # artificial jitter per message (ms)
