@@ -1,0 +1,1 @@
+# Adaptive Hybrid Distributed SGD 
