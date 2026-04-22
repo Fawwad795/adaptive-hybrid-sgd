@@ -4,58 +4,58 @@ Data loading and deterministic sharding for MNIST and CIFAR-10.
 get_shard(rank, world_size, config) → torch.utils.data.DataLoader
   - rank 0 in a world_size-1 setup returns the full dataset shard for that worker.
   - The same (rank, world_size, seed) triple always produces the same indices.
+
+Performance note: data is pre-converted to float32 tensors at load time so that
+each DataLoader __getitem__ is a fast tensor index (μs), not a PIL-Image pipeline
+(~1ms × batch_size per fetch).
 """
 
 import os
 import numpy as np
 import torch
-from torch.utils.data import DataLoader, Subset
+from torch.utils.data import DataLoader, TensorDataset
 import torchvision
-import torchvision.transforms as T
 
 
-# ── Per-dataset transform pipelines ────────────────────────────────────────────
+# ── Pre-processed tensor dataset factory ──────────────────────────────────────
 
-_MNIST_TRANSFORM = T.Compose([
-    T.ToTensor(),
-    T.Normalize((0.1307,), (0.3081,)),
-])
-
-_CIFAR10_TRANSFORM = T.Compose([
-    T.ToTensor(),
-    T.Normalize((0.4914, 0.4822, 0.4465), (0.2470, 0.2435, 0.2616)),
-])
-
-
-def _load_raw_dataset(name: str, data_dir: str, train: bool):
-    """Download (if needed) and return a torchvision Dataset."""
+def _load_tensor_dataset(name: str, data_dir: str, train: bool):
+    """
+    Load and return (X_tensor, y_tensor) with data already normalised to float32.
+    Bypasses per-sample PIL transform pipeline → ~50× faster DataLoader iteration.
+    """
     name = name.lower()
     os.makedirs(data_dir, exist_ok=True)
+
     if name == "mnist":
-        return torchvision.datasets.MNIST(
-            root=data_dir, train=train, download=True, transform=_MNIST_TRANSFORM
-        )
+        ds = torchvision.datasets.MNIST(root=data_dir, train=train, download=True)
+        X = ds.data.float().unsqueeze(1) / 255.0          # (N,1,28,28)
+        X = (X - 0.1307) / 0.3081
+        y = ds.targets.long()
+        return X, y
+
     if name == "cifar10":
-        return torchvision.datasets.CIFAR10(
-            root=data_dir, train=train, download=True, transform=_CIFAR10_TRANSFORM
-        )
+        ds = torchvision.datasets.CIFAR10(root=data_dir, train=train, download=True)
+        X = torch.tensor(ds.data, dtype=torch.float32).permute(0, 3, 1, 2) / 255.0
+        mean = torch.tensor([0.4914, 0.4822, 0.4465]).view(1, 3, 1, 1)
+        std  = torch.tensor([0.2470, 0.2435, 0.2616]).view(1, 3, 1, 1)
+        X = (X - mean) / std
+        y = torch.tensor(ds.targets, dtype=torch.long)
+        return X, y
+
     raise ValueError(f"Unknown dataset: {name!r}. Choose 'mnist' or 'cifar10'.")
 
 
-def _shard_indices(total: int, rank: int, world_size: int, seed: int) -> list[int]:
+def _shard_indices(total: int, rank: int, world_size: int, seed: int) -> np.ndarray:
     """
-    Deterministically partition `total` indices into `world_size` shards and
-    return the shard for `rank`.
-
-    Indices are shuffled once with `seed` so shards are balanced across classes,
-    then split sequentially.  Same inputs → identical output every time.
+    Deterministically partition `total` indices into `world_size` shards.
+    Same (rank, world_size, seed) → identical output every time.
     """
     rng = np.random.default_rng(seed)
-    indices = rng.permutation(total).tolist()
+    indices = rng.permutation(total)
     shard_size = total // world_size
     start = rank * shard_size
-    # Last worker absorbs any remainder.
-    end = start + shard_size if rank < world_size - 1 else total
+    end   = start + shard_size if rank < world_size - 1 else total
     return indices[start:end]
 
 
@@ -70,21 +70,26 @@ def get_shard(rank: int, world_size: int, config: dict, train: bool = True) -> D
     config      : dict with keys: dataset, seed, batch_size, data_dir
     train       : if True, use the training split; else validation split
     """
-    dataset = _load_raw_dataset(config["dataset"], config.get("data_dir", "data"), train)
-    indices = _shard_indices(len(dataset), rank, world_size, config["seed"])
-    subset = Subset(dataset, indices)
-    loader = DataLoader(
-        subset,
+    X, y = _load_tensor_dataset(
+        config["dataset"], config.get("data_dir", "data"), train
+    )
+    idx   = _shard_indices(len(X), rank, world_size, config["seed"])
+    X_sh  = X[idx]
+    y_sh  = y[idx]
+    ds    = TensorDataset(X_sh, y_sh)
+    return DataLoader(
+        ds,
         batch_size=config["batch_size"],
-        shuffle=train,          # re-shuffle each epoch within the shard
+        shuffle=train,
         drop_last=False,
-        num_workers=0,          # keep 0 for multiprocessing compatibility
+        num_workers=0,
         generator=torch.Generator().manual_seed(config["seed"] + rank),
     )
-    return loader
 
 
 def get_full_val_loader(config: dict) -> DataLoader:
     """Full validation set (unsharded) for accuracy evaluation."""
-    dataset = _load_raw_dataset(config["dataset"], config.get("data_dir", "data"), train=False)
-    return DataLoader(dataset, batch_size=256, shuffle=False, num_workers=0)
+    X, y = _load_tensor_dataset(
+        config["dataset"], config.get("data_dir", "data"), train=False
+    )
+    return DataLoader(TensorDataset(X, y), batch_size=256, shuffle=False, num_workers=0)

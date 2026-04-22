@@ -149,6 +149,12 @@ class SmallCNN(nn.Module):
             for name, param in self.named_parameters():
                 param.copy_(torch.from_numpy(params[name]))
 
+    def update(self, grads: dict[str, np.ndarray], lr: float) -> None:
+        with torch.no_grad():
+            for name, param in self.named_parameters():
+                if name in grads:
+                    param -= lr * torch.from_numpy(grads[name]).to(param.device)
+
     def param_count(self) -> int:
         return sum(p.numel() for p in self.parameters())
 

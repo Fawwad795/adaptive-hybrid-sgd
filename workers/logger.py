@@ -20,18 +20,18 @@ class RunLogger:
     def __init__(self, run_id: str, log_dir: str = "results/raw"):
         Path(log_dir).mkdir(parents=True, exist_ok=True)
         self._path = Path(log_dir) / f"{run_id}.jsonl"
-        self._fh = open(self._path, "w", encoding="utf-8")
+        self._fh = open(self._path, "w", encoding="utf-8", buffering=1 << 16)
         self._start = time.perf_counter()
 
     def log(self, row: dict) -> None:
         row.setdefault("wall_sec", round(time.perf_counter() - self._start, 4))
         self._fh.write(json.dumps(row) + "\n")
-        self._fh.flush()
 
     def path(self) -> str:
         return str(self._path)
 
     def close(self) -> None:
+        self._fh.flush()
         self._fh.close()
 
     # context-manager support
