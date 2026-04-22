@@ -20,6 +20,7 @@ ring_allreduce(local_grads, rank, world_size, shared_bufs) -> avg_grads
 
 from __future__ import annotations
 import ctypes
+import time
 import multiprocessing as mp
 import numpy as np
 
@@ -59,6 +60,7 @@ def ring_allreduce(
     rank:         int,
     world_size:   int,
     shared_bufs:  dict,
+    throttle_ms:  float = 0.0,
 ) -> dict[str, np.ndarray]:
     """
     Average `local_grads` across all workers using ring reduce-scatter + allgather.
@@ -86,6 +88,8 @@ def ring_allreduce(
     # Each worker accumulates world_size-1 chunks from its left neighbour.
     # We keep a running accumulator in send_bufs[rank] (sum of contributions).
     for step in range(world_size - 1):
+        if throttle_ms > 0:
+            time.sleep(throttle_ms / 1000.0)
         src = (rank - step - 1) % world_size
         for key, shape in param_shapes.items():
             my_arr  = np.frombuffer(send_bufs[rank][key], dtype=np.float32)

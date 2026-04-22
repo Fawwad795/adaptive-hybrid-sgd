@@ -93,7 +93,8 @@ def run_ps_worker(
         criterion = nn.CrossEntropyLoss()
 
     logger = RunLogger(run_id, config.get("log_dir", "results/raw"))
-    client = PSClient(rank=rank, port=port)
+    client = PSClient(rank=rank, port=port,
+                      throttle_ms=float(config.get("throttle_ms", 0.0)))
     client.connect()
 
     metrics: list[dict] = []
@@ -249,7 +250,8 @@ def run_rar_worker(
             compute_ms = (time.perf_counter() - t_compute) * 1000
 
             t_comm = time.perf_counter()
-            avg_grads = ring_allreduce(grads, rank, world_size, shared_bufs)
+            avg_grads = ring_allreduce(grads, rank, world_size, shared_bufs,
+                                       throttle_ms=float(config.get("throttle_ms", 0.0)))
             comm_ms   = (time.perf_counter() - t_comm) * 1000
 
             model.update(avg_grads, lr)

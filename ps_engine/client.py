@@ -13,6 +13,7 @@ client.close()
 
 from __future__ import annotations
 import json
+import time
 import numpy as np
 import zmq
 
@@ -23,10 +24,12 @@ class PSClient:
     """DEALER socket that communicates with PSServer (ROUTER)."""
 
     def __init__(self, rank: int, port: int = 5555,
-                 timeout_ms: int = 300_000) -> None:
-        self.rank       = rank
-        self.port       = port
-        self.timeout_ms = timeout_ms
+                 timeout_ms: int = 300_000,
+                 throttle_ms: float = 0.0) -> None:
+        self.rank        = rank
+        self.port        = port
+        self.timeout_ms  = timeout_ms
+        self.throttle_ms = throttle_ms   # artificial comm delay (bandwidth simulation)
         self._ctx: zmq.Context | None   = None
         self._sock: zmq.Socket | None   = None
 
@@ -45,6 +48,8 @@ class PSClient:
     # ── Send gradient ──────────────────────────────────────────────────────────
 
     def push_gradient(self, grads: dict[str, np.ndarray], clock: int = 0) -> None:
+        if self.throttle_ms > 0:
+            time.sleep(self.throttle_ms / 1000.0)
         meta    = json.dumps({"rank": self.rank, "clock": clock}).encode()
         payload = pack(grads)
         self._sock.send_multipart([b"", b"GRAD", meta, payload])
