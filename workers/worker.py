@@ -67,6 +67,7 @@ def run_ps_worker(
     result_queue,
     port:        int = 5555,
     straggler_delay: float = 0.0,
+    params_queue = None,
 ) -> None:
     """Training loop for a single PS worker."""
     from ps_engine.client import PSClient
@@ -187,6 +188,8 @@ def run_ps_worker(
 
     client.send_stop()
     client.close()
+    if rank == 0 and params_queue is not None:
+        params_queue.put(model.get_params())
     logger.close()
     summaries = [m for m in metrics if m.get("phase") != "train"]
     result_queue.put({"rank": rank, "metrics": summaries})
@@ -202,6 +205,7 @@ def run_rar_worker(
     result_queue,
     shared_bufs: dict,
     straggler_delay: float = 0.0,
+    params_queue = None,
 ) -> None:
     """Training loop for a single RAR worker."""
     from rar_engine.ring_allreduce import ring_allreduce
@@ -315,6 +319,8 @@ def run_rar_worker(
                 f"comm={avg_comm:.1f}ms cmp={avg_cmp:.1f}ms"
             )
 
+    if rank == 0 and params_queue is not None:
+        params_queue.put(model.get_params())
     logger.close()
     summaries = [m for m in metrics if m.get("phase") != "train"]
     result_queue.put({"rank": rank, "metrics": summaries})
