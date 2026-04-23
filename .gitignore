@@ -15,7 +15,7 @@ data/
 results/raw/
 results/plots/
 results/tables/
-results/report/
+# results/report/ — kept in git (final deliverable)
 
 # Pytest cache
 .pytest_cache/
