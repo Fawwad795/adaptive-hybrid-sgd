@@ -53,6 +53,11 @@ def _throttle_ms(bandwidth_mbps: float) -> float:
     return _GRAD_BYTES / (bandwidth_mbps * 1e6 / 8) * 1000
 
 
+def _rar_throttle_ms(bandwidth_mbps: float) -> float:
+    # Each ring step transfers only 1/world_size of the gradient.
+    return _GRAD_BYTES / _WORLD_SIZE / (bandwidth_mbps * 1e6 / 8) * 1000
+
+
 def _get_system_tp(prefix: str, world_size: int) -> float:
     total = 0.0
     for r in range(world_size):
@@ -153,8 +158,9 @@ def run(config: dict) -> None:
     rows: list[dict] = []
 
     for bw_label, bw_mbps in _BANDWIDTHS.items():
-        t_ms = _throttle_ms(bw_mbps)
-        print(f"\n[E4] Bandwidth={bw_label} ({bw_mbps} Mbps)  throttle={t_ms:.3f}ms/msg")
+        ps_t_ms  = _throttle_ms(bw_mbps)
+        rar_t_ms = _rar_throttle_ms(bw_mbps)
+        print(f"\n[E4] Bandwidth={bw_label} ({bw_mbps} Mbps)  ps_throttle={ps_t_ms:.3f}ms  rar_throttle={rar_t_ms:.3f}ms")
 
         for mode in ["ps", "rar"]:
             tps: list[float] = []
@@ -163,10 +169,10 @@ def run(config: dict) -> None:
                 print(f"  {mode.upper()} seed={seed} ...", end="", flush=True)
                 try:
                     if mode == "ps":
-                        tp = _run_ps_trial(seed, t_ms, label, port)
+                        tp = _run_ps_trial(seed, ps_t_ms, label, port)
                         port += 1
                     else:
-                        tp = _run_rar_trial(seed, t_ms, label)
+                        tp = _run_rar_trial(seed, rar_t_ms, label)
                     tps.append(tp)
                     print(f" tp={tp:.0f}")
                 except Exception as exc:
@@ -179,7 +185,7 @@ def run(config: dict) -> None:
             rows.append({
                 "bandwidth":        bw_label,
                 "bandwidth_mbps":   bw_mbps,
-                "throttle_ms":      round(t_ms, 4),
+                "throttle_ms":      round(ps_t_ms if mode == "ps" else rar_t_ms, 4),
                 "mode":             mode,
                 "throughput_mean":  round(avg, 1),
                 "throughput_std":   round(std, 1),

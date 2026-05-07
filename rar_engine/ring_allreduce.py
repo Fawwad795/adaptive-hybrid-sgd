@@ -24,6 +24,12 @@ import time
 import multiprocessing as mp
 import numpy as np
 
+# Use the spawn context so that Array/Barrier handles are transferable via
+# pickle to child processes spawned with mp.get_context("spawn") on Linux.
+# The default context on Linux is "fork", whose anonymous mmap objects are
+# NOT pickle-safe and silently fail in spawned children.
+_SPAWN = mp.get_context("spawn")
+
 
 # ── Buffer factory (called once in parent) ─────────────────────────────────────
 
@@ -38,17 +44,20 @@ def make_shared_buffers(world_size: int,
         "barrier"    : mp.Barrier(world_size) — synchronise ring steps
         "param_shapes": {key: shape}
     """
-    send_bufs: list[dict[str, mp.Array]] = []
+    send_bufs = []
     for _ in range(world_size):
-        worker_buf: dict[str, mp.Array] = {}
+        worker_buf: dict = {}
         for key, shape in param_shapes.items():
             n = int(np.prod(shape))
-            worker_buf[key] = mp.Array(ctypes.c_float, n, lock=False)
+            # _SPAWN.Array uses named POSIX shared memory (/dev/shm/pymp-*)
+            # which survives pickling into spawn children, unlike the default
+            # fork-context anonymous mmap.
+            worker_buf[key] = _SPAWN.Array(ctypes.c_float, n)
         send_bufs.append(worker_buf)
 
     return {
-        "send_bufs":   send_bufs,
-        "barrier":     mp.Barrier(world_size),
+        "send_bufs":    send_bufs,
+        "barrier":      _SPAWN.Barrier(world_size),
         "param_shapes": dict(param_shapes),
     }
 
@@ -69,52 +78,63 @@ def ring_allreduce(
     -----
     1. Each worker writes its gradient into send_bufs[rank].
     2. Barrier — all workers have written.
-    3. Reduce-scatter: (world_size-1) steps; each step adds a neighbour chunk.
-    4. Barrier between each step.
-    5. Allgather: (world_size-1) steps; circulate the final chunk.
+    3. Reduce-scatter: (world_size-1) steps; each step snapshots a neighbour's
+       buffer BEFORE the write phase, then accumulates into own buffer.
+       Two barriers per step prevent the read/write race condition that existed
+       in the original single-barrier design.
+    4. Phase 2 — divide accumulated sum to get the average.
+    5. Allgather — broadcast average back via rank-0's buffer.
     6. Return averaged gradient dict.
     """
-    send_bufs   = shared_bufs["send_bufs"]
-    barrier     = shared_bufs["barrier"]
+    send_bufs    = shared_bufs["send_bufs"]
+    barrier      = shared_bufs["barrier"]
     param_shapes = shared_bufs["param_shapes"]
 
     # Phase 0 — write local gradients into shared buffer
     for key, shape in param_shapes.items():
-        arr = np.frombuffer(send_bufs[rank][key], dtype=np.float32)
+        arr = np.frombuffer(send_bufs[rank][key].get_obj(), dtype=np.float32)
         np.copyto(arr, local_grads[key].ravel().astype(np.float32))
     barrier.wait()
 
     # Phase 1 — reduce-scatter
-    # Each worker accumulates world_size-1 chunks from its left neighbour.
-    # We keep a running accumulator in send_bufs[rank] (sum of contributions).
+    # Each step uses a snapshot taken BEFORE any worker writes, eliminating
+    # the race where rank r reads send_bufs[src] while src is also writing it.
     for step in range(world_size - 1):
         if throttle_ms > 0:
             time.sleep(throttle_ms / 1000.0)
         src = (rank - step - 1) % world_size
-        for key, shape in param_shapes.items():
-            my_arr  = np.frombuffer(send_bufs[rank][key], dtype=np.float32)
-            src_arr = np.frombuffer(send_bufs[src][key],  dtype=np.float32)
-            my_arr += src_arr
-        barrier.wait()
+
+        # Snapshot src's buffer while no writes are in flight (all workers are
+        # here before any has started writing in this step).
+        snapshots = {
+            key: np.frombuffer(send_bufs[src][key].get_obj(), dtype=np.float32).copy()
+            for key in param_shapes
+        }
+        barrier.wait()   # barrier 1: everyone has their snapshot
+
+        for key in param_shapes:
+            my_arr = np.frombuffer(send_bufs[rank][key].get_obj(), dtype=np.float32)
+            my_arr += snapshots[key]
+        barrier.wait()   # barrier 2: all writes done before next step reads
 
     # At this point send_bufs[rank] holds the SUM of all workers' gradients.
     # Phase 2 — divide to get average
     avg_grads: dict[str, np.ndarray] = {}
     for key, shape in param_shapes.items():
-        arr = np.frombuffer(send_bufs[rank][key], dtype=np.float32).copy()
+        arr = np.frombuffer(send_bufs[rank][key].get_obj(), dtype=np.float32).copy()
         arr /= world_size
         avg_grads[key] = arr.reshape(shape)
 
     # Phase 3 — allgather (write average back so all workers see the same result)
     for key, shape in param_shapes.items():
-        arr = np.frombuffer(send_bufs[rank][key], dtype=np.float32)
+        arr = np.frombuffer(send_bufs[rank][key].get_obj(), dtype=np.float32)
         np.copyto(arr, avg_grads[key].ravel())
     barrier.wait()
 
     # Read final averaged gradient from rank-0's buffer (all are identical)
     final_grads: dict[str, np.ndarray] = {}
     for key, shape in param_shapes.items():
-        arr = np.frombuffer(send_bufs[0][key], dtype=np.float32).copy()
+        arr = np.frombuffer(send_bufs[0][key].get_obj(), dtype=np.float32).copy()
         final_grads[key] = arr.reshape(shape)
 
     return final_grads

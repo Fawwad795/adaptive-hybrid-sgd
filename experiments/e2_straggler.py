@@ -23,9 +23,9 @@ from pathlib import Path
 
 _WORLD_SIZE    = 4
 _STRAGGLER_RANK = _WORLD_SIZE - 1   # always the last worker
-_SEEDS         = [42, 123, 456]
+_SEEDS         = [42, 123, 456, 789]
 _EPOCHS        = 2
-_FACTORS       = [1, 2, 3, 5]       # slowdown multipliers
+_FACTORS       = [1, 2, 3, 4, 5]    # slowdown multipliers
 _LOG_DIR       = "results/raw"
 
 # Approximate compute_ms per batch for LogReg on MNIST (measured from E1)

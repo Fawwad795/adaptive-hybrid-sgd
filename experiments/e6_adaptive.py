@@ -34,13 +34,13 @@ from pathlib import Path
 
 _WORLD_SIZE      = 4
 _SEEDS           = [42, 123, 456]
-_N_EPOCHS        = 5
+_N_EPOCHS        = 8
 _LOG_DIR         = "results/raw"
 _STRAGGLER_RANK  = 3
-_STRAGGLER_FACTOR= 3.0
-_BASE_COMPUTE_MS = 5.0
+_STRAGGLER_FACTOR= 5.0
+_BASE_COMPUTE_MS = 7.0
 _STRAGGLER_DELAY = _BASE_COMPUTE_MS / 1000 * (_STRAGGLER_FACTOR - 1)  # seconds
-_STRAGGLER_EPOCHS= frozenset([3, 4])   # straggler active in these epochs
+_STRAGGLER_EPOCHS= frozenset([4, 5, 6])   # straggler active in these epochs
 
 
 # ── helpers ────────────────────────────────────────────────────────────────────

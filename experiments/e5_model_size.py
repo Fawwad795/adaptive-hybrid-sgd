@@ -23,7 +23,7 @@ from pathlib import Path
 
 _WORLD_SIZE = 2
 _SEEDS      = [42, 123, 456]
-_EPOCHS     = 2
+_EPOCHS     = 3
 _LOG_DIR    = "results/raw"
 
 # Model configs

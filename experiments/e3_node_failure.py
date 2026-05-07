@@ -29,6 +29,7 @@ from pathlib import Path
 _WORLD_SIZE     = 4
 _STRAGGLER_RANK = _WORLD_SIZE - 1
 _SEEDS          = [42, 123, 456]
+_N_BASELINES    = 3
 _EPOCHS         = 3          # enough to see recovery across epochs 2-3
 _KILL_DELAY_S   = 22.0       # seconds after workers start → kills mid-training (epoch 1~2)
 _LOG_DIR        = "results/raw"
@@ -64,13 +65,14 @@ def _base_config(seed: int) -> dict:
                 ps_discipline="async", data_dir="data", log_dir=_LOG_DIR)
 
 
-def _run_ps_trial(seed: int, port: int, kill_rank: int | None = None) -> None:
+def _run_ps_trial(seed: int, port: int, kill_rank: int | None = None,
+                  label_suffix: str = "") -> None:
     """Spawn server + workers; optionally kill kill_rank after _KILL_DELAY_S."""
     from workers.models import build_model
     from workers.worker import run_ps_worker
     from ps_engine.server import ps_server_process
 
-    label = f"e3_{'fail' if kill_rank is not None else 'base'}_seed{seed}"
+    label = f"e3_{'fail' if kill_rank is not None else 'base'}_seed{seed}{label_suffix}"
     cfg   = dict(_base_config(seed))
     model = build_model("logreg", seed=seed)
     init_params = model.get_params()
@@ -133,15 +135,21 @@ def run(config: dict) -> None:
     rows: list[dict] = []
 
     for seed in _SEEDS:
-        # ── Baseline: no failure ───────────────────────────────────────────────
-        print(f"\n[E3] baseline  seed={seed}")
-        _run_ps_trial(seed, port, kill_rank=None)
-        port += 1
-        base_acc = _get_final_val_acc(
-            f"{_LOG_DIR}/e3_base_seed{seed}_r0")
-        base_tp  = _get_system_tp(
-            f"{_LOG_DIR}/e3_base_seed{seed}", _WORLD_SIZE)
-        print(f"  base val_acc={base_acc:.4f}  base_tp={base_tp:.1f}")
+        # ── Baseline: no failure (averaged over _N_BASELINES runs) ────────────
+        print(f"\n[E3] baseline  seed={seed}  (averaging {_N_BASELINES} runs)")
+        base_tps = []
+        base_accs = []
+        for i in range(_N_BASELINES):
+            _run_ps_trial(seed, port, kill_rank=None, label_suffix=f"_b{i}")
+            port += 1
+            btp = _get_system_tp(f"{_LOG_DIR}/e3_base_seed{seed}_b{i}", _WORLD_SIZE)
+            bacc = _get_final_val_acc(f"{_LOG_DIR}/e3_base_seed{seed}_b{i}_r0")
+            base_tps.append(btp)
+            base_accs.append(bacc)
+            time.sleep(1.0)
+        base_tp = sum(base_tps) / len(base_tps)
+        base_acc = sum(base_accs) / len(base_accs)
+        print(f"  base val_acc={base_acc:.4f}  base_tp={base_tp:.1f} (avg of {_N_BASELINES})")
         time.sleep(1.5)
 
         # ── Failure: kill worker _STRAGGLER_RANK after _KILL_DELAY_S s ────────

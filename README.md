@@ -31,6 +31,29 @@ make phase1-cnn   # CNN on CIFAR-10
 make test-phase1  # run Phase 1 unit tests
 ```
 
+## Judge Demo App
+
+The repository now includes a modern demo UI for live judge-facing runs.
+
+Backend:
+
+```bash
+python -m uvicorn demo_api.app:app --host 127.0.0.1 --port 8000
+```
+
+Frontend:
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` and use the **Hybrid Straggler Demo** preset for the
+best live presentation flow. The frontend connects to the FastAPI backend, streams
+epoch/iteration events live, and surfaces controller switch decisions plus
+checkpoint artifacts.
+
 ---
 
 ## Directory Structure

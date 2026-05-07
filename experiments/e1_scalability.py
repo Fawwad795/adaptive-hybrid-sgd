@@ -20,7 +20,7 @@ from pathlib import Path
 
 _WORLD_SIZES = [2, 4, 8]
 _SEEDS       = [42, 123, 456]
-_EPOCHS      = 2
+_EPOCHS      = 3
 
 
 # ── Trial runners ──────────────────────────────────────────────────────────────
@@ -125,11 +125,11 @@ def run(config: dict) -> None:
     Path("results/tables").mkdir(parents=True, exist_ok=True)
     Path("results/plots").mkdir(parents=True, exist_ok=True)
 
-    cfg = dict(config, dataset="mnist", model="logreg",
+    cfg = dict(config, dataset="cifar10", model="cnn",
                epochs=_EPOCHS, log_dir="results/raw")
 
     print("\n" + "=" * 60)
-    print("  E1: Scalability  —  MNIST / LogReg")
+    print("  E1: Scalability  —  CIFAR-10 / CNN")
     print(f"  workers={_WORLD_SIZES}  seeds={_SEEDS}  epochs={_EPOCHS}")
     print("=" * 60)
 
